@@ -15,9 +15,6 @@
     "ios": {
       "supportsTablet": true
     },
-    "android": {
-      "edgeToEdgeEnabled": true
-    },
     "plugins": [
       [
         "expo-image-picker",
