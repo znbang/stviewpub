@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "stviewpub",
+    "slug": "stviewpub",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "platforms": ["ios", "android", "web"],
+    "web": {
+      "bundler": "metro"
+    },
+    "experiments": {
+      "baseUrl": "/stviewpub"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "stviewpub needs photo access to inspect 360 photo metadata before upload."
+        }
+      ]
+    ]
+  }
+}
