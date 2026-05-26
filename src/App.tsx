@@ -186,7 +186,7 @@ export default function App() {
       <ScrollView contentContainerStyle={[styles.page, styles.loginPage]}>
         <View style={styles.loginShell}>
           <View style={styles.header}>
-            <Text style={styles.title}>PanoramaPublisher</Text>
+            <Text style={styles.title}>Street View Publisher</Text>
             <Text style={styles.subtitle}>
               Sign in before selecting photos for Street View publishing.
             </Text>
@@ -228,7 +228,7 @@ export default function App() {
     <ScrollView contentContainerStyle={styles.page}>
       <View style={styles.shell}>
         <View style={styles.header}>
-          <Text style={styles.title}>PanoramaPublisher</Text>
+          <Text style={styles.title}>Street View Publisher</Text>
           <Text style={styles.subtitle}>Publish GPS-tagged 360 JPEG photos to Google Street View.</Text>
         </View>
 
