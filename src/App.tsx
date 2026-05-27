@@ -72,6 +72,9 @@ export default function App() {
     () => photos.filter((photo) => photo.status === 'pending' && photo.location),
     [photos],
   );
+  const skippedCount = photos.filter((photo) => photo.status === 'skipped').length;
+  const successCount = photos.filter((photo) => photo.status === 'success').length;
+  const errorCount = photos.filter((photo) => photo.status === 'error').length;
   const completedCount = photos.filter((photo) =>
     ['success', 'error', 'skipped'].includes(photo.status),
   ).length;
@@ -180,25 +183,27 @@ export default function App() {
 
   const isSignedIn = Platform.OS === 'web' ? !!accessToken : mobilePreviewSignedIn;
   const canUpload = Platform.OS === 'web' && !!accessToken && uploadablePhotos.length > 0;
+  const uploadButtonLabel =
+    Platform.OS !== 'web'
+      ? 'Web upload only'
+      : photos.length === 0
+        ? 'Select photos first'
+        : uploadablePhotos.length === 0
+          ? 'No photos ready'
+          : 'Start upload';
 
   if (!isSignedIn) {
     return (
       <ScrollView contentContainerStyle={[styles.page, styles.loginPage]}>
         <View style={styles.loginShell}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Street View Publisher</Text>
-            <Text style={styles.subtitle}>
-              Sign in before selecting photos for Street View publishing.
+          <View style={styles.loginHeader}>
+            <Text style={styles.loginTitle}>Street View Publisher</Text>
+            <Text style={styles.loginSubtitle}>
+              Publish 360 panorama photos.
             </Text>
           </View>
 
           <View style={styles.loginPanel}>
-            <Text style={styles.sectionTitle}>Google access</Text>
-            <Text style={styles.loginCopy}>
-              {Platform.OS === 'web'
-                ? 'Authorize this browser session to upload GPS-tagged 360 JPEG photos to Google Street View.'
-                : 'Mobile v1 supports photo selection and GPS EXIF preview. Google publishing is available on web.'}
-            </Text>
             {authMessage ? <Text style={styles.notice}>{authMessage}</Text> : null}
             <Pressable
               onPress={
@@ -227,23 +232,15 @@ export default function App() {
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <View style={styles.shell}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Street View Publisher</Text>
-          <Text style={styles.subtitle}>Publish GPS-tagged 360 JPEG photos to Google Street View.</Text>
-        </View>
-
-        <View style={styles.panel}>
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.sectionTitle}>Google access</Text>
-              <Text style={styles.muted}>
-                {Platform.OS === 'web'
-                  ? accessToken
-                    ? 'Connected for upload'
-                    : 'Web upload requires Google authorization'
-                  : 'Mobile preview only in v1'}
-              </Text>
-            </View>
+        <View style={styles.appHeader}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Street View Publisher</Text>
+            <Text style={styles.subtitle}>Publish 360 panorama photos.</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <Text style={styles.connectionBadge}>
+              {Platform.OS === 'web' ? 'Connected' : 'Preview'}
+            </Text>
             {Platform.OS === 'web' ? (
               <Pressable
                 disabled={isUploading}
@@ -254,9 +251,7 @@ export default function App() {
                   isUploading && styles.disabled,
                 ]}
               >
-                <Text style={styles.secondaryButtonText}>
-                  {accessToken ? 'Refresh token' : 'Sign in'}
-                </Text>
+                <Text style={styles.secondaryButtonText}>Refresh token</Text>
               </Pressable>
             ) : (
               <Pressable
@@ -271,31 +266,38 @@ export default function App() {
               </Pressable>
             )}
           </View>
-          {authMessage ? <Text style={styles.notice}>{authMessage}</Text> : null}
         </View>
+        {authMessage ? <Text style={styles.notice}>{authMessage}</Text> : null}
 
-        <View style={styles.panel}>
+        <View style={styles.queuePanel}>
           <View style={styles.rowBetween}>
             <View>
               <Text style={styles.sectionTitle}>Photos</Text>
-              <Text style={styles.muted}>JPEG only. Photos without GPS EXIF are skipped.</Text>
+              <Text style={styles.muted}>
+                {completedCount} / {photos.length} processed
+              </Text>
             </View>
-            {photos.length > 0 ? (
-              <Pressable disabled={isUploading} onPress={clearPhotos} style={styles.textButton}>
-                <Text style={styles.textButtonLabel}>Clear</Text>
-              </Pressable>
-            ) : null}
+            <View style={styles.queueActions}>
+              {photos.length > 0 ? (
+                <Pressable disabled={isUploading} onPress={clearPhotos} style={styles.textButton}>
+                  <Text style={styles.textButtonLabel}>Clear</Text>
+                </Pressable>
+              ) : null}
+              <PhotoPicker disabled={isUploading} onPhotosPicked={handlePhotosPicked} />
+            </View>
           </View>
-          <PhotoPicker disabled={isUploading} onPhotosPicked={handlePhotosPicked} />
-        </View>
 
-        <View style={styles.panel}>
+          <View style={styles.summaryRow}>
+            <SummaryChip label="Ready" value={uploadablePhotos.length} />
+            <SummaryChip label="Skipped" value={skippedCount} />
+            <SummaryChip label="Uploaded" value={successCount} />
+            <SummaryChip label="Errors" value={errorCount} />
+          </View>
+
           <View style={styles.rowBetween}>
             <View>
               <Text style={styles.sectionTitle}>Upload progress</Text>
-              <Text style={styles.muted}>
-                {completedCount} / {photos.length} processed, {uploadablePhotos.length} ready
-              </Text>
+              <Text style={styles.muted}>{uploadablePhotos.length} ready to upload</Text>
             </View>
             <Pressable
               disabled={!canUpload || isUploading}
@@ -309,9 +311,7 @@ export default function App() {
               {isUploading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.primaryButtonText}>
-                  {Platform.OS === 'web' ? 'Start upload' : 'Web upload only'}
-                </Text>
+                <Text style={styles.primaryButtonText}>{uploadButtonLabel}</Text>
               )}
             </Pressable>
           </View>
@@ -335,6 +335,15 @@ export default function App() {
         </View>
       </View>
     </ScrollView>
+  );
+}
+
+function SummaryChip({ label, value }: { label: string; value: number }) {
+  return (
+    <View style={styles.summaryChip}>
+      <Text style={styles.summaryValue}>{value}</Text>
+      <Text style={styles.summaryLabel}>{label}</Text>
+    </View>
   );
 }
 
@@ -410,13 +419,51 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   loginShell: {
-    gap: 18,
-    maxWidth: 520,
+    gap: 20,
+    maxWidth: 560,
     width: '100%',
+  },
+  loginHeader: {
+    gap: 8,
+  },
+  loginTitle: {
+    color: '#172033',
+    fontSize: 34,
+    fontWeight: '800',
+  },
+  loginSubtitle: {
+    color: '#536172',
+    fontSize: 16,
+    lineHeight: 24,
+    maxWidth: 520,
   },
   header: {
     gap: 6,
     paddingVertical: 12,
+  },
+  appHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14,
+    justifyContent: 'space-between',
+  },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    paddingTop: 12,
+  },
+  connectionBadge: {
+    backgroundColor: '#dcfce7',
+    borderRadius: 999,
+    color: '#166534',
+    fontSize: 13,
+    fontWeight: '800',
+    overflow: 'hidden',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   title: {
     color: '#172033',
@@ -435,13 +482,21 @@ const styles = StyleSheet.create({
     gap: 14,
     padding: 16,
   },
-  loginPanel: {
+  queuePanel: {
     backgroundColor: '#fff',
     borderColor: '#dce3ec',
     borderRadius: 8,
     borderWidth: 1,
     gap: 16,
-    padding: 20,
+    padding: 16,
+  },
+  loginPanel: {
+    backgroundColor: '#fff',
+    borderColor: '#dce3ec',
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 14,
+    padding: 22,
   },
   loginCopy: {
     color: '#536172',
@@ -451,8 +506,39 @@ const styles = StyleSheet.create({
   rowBetween: {
     alignItems: 'center',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 14,
     justifyContent: 'space-between',
+  },
+  queueActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  summaryChip: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    borderWidth: 1,
+    minWidth: 104,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  summaryValue: {
+    color: '#172033',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  summaryLabel: {
+    color: '#64748b',
+    fontSize: 13,
+    marginTop: 2,
   },
   sectionTitle: {
     color: '#1e293b',
