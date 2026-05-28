@@ -27,6 +27,11 @@ const statusLabels: Record<QueuePhoto['status'], string> = {
   error: 'Error',
 };
 
+type GoogleUser = {
+  name?: string;
+  email?: string;
+};
+
 const loadGoogleIdentityServices = () =>
   new Promise<void>((resolve, reject) => {
     if (Platform.OS !== 'web') {
@@ -58,8 +63,24 @@ const loadGoogleIdentityServices = () =>
     document.head.appendChild(script);
   });
 
+const fetchGoogleUser = async (accessToken: string): Promise<GoogleUser | null> => {
+  const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  if (!response.ok) return null;
+
+  const body = (await response.json()) as GoogleUser;
+  return {
+    name: body.name,
+    email: body.email,
+  };
+};
+
 export default function App() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
   const [mobilePreviewSignedIn, setMobilePreviewSignedIn] = useState(false);
   const [authMessage, setAuthMessage] = useState('');
   const [photos, setPhotos] = useState<QueuePhoto[]>([]);
@@ -91,6 +112,7 @@ export default function App() {
     accessTokenRef.current = token;
     tokenExpiresAtRef.current = expiresAt;
     setAccessToken(token);
+    if (!token) setGoogleUser(null);
   };
 
   const requestGoogleToken = async (prompt?: '' | 'consent'): Promise<string | null> => {
@@ -112,12 +134,14 @@ export default function App() {
     tokenClientRef.current ??= window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: STREET_VIEW_SCOPE,
-      callback: (response: GoogleTokenResponse) => {
+      callback: async (response: GoogleTokenResponse) => {
         const pendingRequest = pendingTokenRequestRef.current;
         pendingTokenRequestRef.current = null;
 
         if (response.access_token) {
           saveAccessToken(response.access_token, response.expires_in);
+          const user = await fetchGoogleUser(response.access_token).catch(() => null);
+          setGoogleUser(user);
           setAuthMessage('Signed in for this browser session.');
           pendingRequest?.resolve(response.access_token);
           return;
@@ -259,6 +283,8 @@ export default function App() {
 
   const isSignedIn = Platform.OS === 'web' ? !!accessToken : mobilePreviewSignedIn;
   const canUpload = Platform.OS === 'web' && !!accessToken && uploadablePhotos.length > 0;
+  const signedInLabel =
+    Platform.OS === 'web' ? (googleUser?.email ?? 'Signed in') : 'Preview';
   const uploadButtonLabel =
     Platform.OS !== 'web'
       ? 'Web upload only'
@@ -316,24 +342,10 @@ export default function App() {
             <Text style={styles.subtitle}>Publish 360 panorama photos.</Text>
           </View>
           <View style={styles.headerActions}>
-            <Text style={styles.connectionBadge}>
-              {Platform.OS === 'web' ? 'Connected' : 'Preview'}
+            <Text numberOfLines={1} style={styles.connectionBadge}>
+              {signedInLabel}
             </Text>
-            {Platform.OS === 'web' ? (
-              <Pressable
-                disabled={isUploading}
-                onPress={() => {
-                  void requestGoogleToken();
-                }}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  pressed && !isUploading && styles.secondaryButtonPressed,
-                  isUploading && styles.disabled,
-                ]}
-              >
-                <Text style={styles.secondaryButtonText}>Refresh token</Text>
-              </Pressable>
-            ) : (
+            {Platform.OS !== 'web' ? (
               <Pressable
                 disabled={isUploading}
                 onPress={() => {
@@ -344,7 +356,7 @@ export default function App() {
               >
                 <Text style={styles.secondaryButtonText}>Sign out</Text>
               </Pressable>
-            )}
+            ) : null}
           </View>
         </View>
         {authMessage ? <Text style={styles.notice}>{authMessage}</Text> : null}
