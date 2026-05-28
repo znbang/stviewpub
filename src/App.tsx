@@ -64,6 +64,12 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [photos, setPhotos] = useState<QueuePhoto[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const accessTokenRef = useRef<string | null>(null);
+  const tokenExpiresAtRef = useRef(0);
+  const pendingTokenRequestRef = useRef<{
+    resolve: (token: string | null) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
   const tokenClientRef = useRef<ReturnType<
     NonNullable<Window['google']>['accounts']['oauth2']['initTokenClient']
   > | null>(null);
@@ -79,38 +85,80 @@ export default function App() {
     ['success', 'error', 'skipped'].includes(photo.status),
   ).length;
 
-  const requestGoogleToken = async () => {
-    if (Platform.OS !== 'web') return;
+  const saveAccessToken = (token: string | null, expiresInSeconds?: number) => {
+    const expiresAt = token && expiresInSeconds ? Date.now() + expiresInSeconds * 1000 : 0;
+
+    accessTokenRef.current = token;
+    tokenExpiresAtRef.current = expiresAt;
+    setAccessToken(token);
+  };
+
+  const requestGoogleToken = async (prompt?: '' | 'consent'): Promise<string | null> => {
+    if (Platform.OS !== 'web') return null;
     try {
       await loadGoogleIdentityServices();
     } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : 'Google sign-in failed to load.');
-      return;
+      const message = error instanceof Error ? error.message : 'Google sign-in failed to load.';
+      setAuthMessage(message);
+      throw new Error(message);
     }
 
     if (!window.google?.accounts?.oauth2) {
-      setAuthMessage('Google Identity Services is still loading. Try again in a moment.');
-      return;
+      const message = 'Google Identity Services is still loading. Try again in a moment.';
+      setAuthMessage(message);
+      throw new Error(message);
     }
 
     tokenClientRef.current ??= window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: STREET_VIEW_SCOPE,
       callback: (response: GoogleTokenResponse) => {
+        const pendingRequest = pendingTokenRequestRef.current;
+        pendingTokenRequestRef.current = null;
+
         if (response.access_token) {
-          setAccessToken(response.access_token);
+          saveAccessToken(response.access_token, response.expires_in);
           setAuthMessage('Signed in for this browser session.');
+          pendingRequest?.resolve(response.access_token);
           return;
         }
 
-        setAuthMessage(response.error_description ?? response.error ?? 'Google sign-in failed.');
+        const message = response.error_description ?? response.error ?? 'Google sign-in failed.';
+        setAuthMessage(message);
+        pendingRequest?.reject(new Error(message));
       },
-      error_callback: () => {
-        setAuthMessage('Google sign-in popup failed or was closed.');
+      error_callback: (error: unknown) => {
+        const message =
+          typeof error === 'object' && error !== null && 'message' in error
+            ? String(error.message)
+            : 'Google sign-in popup failed or was closed.';
+
+        pendingTokenRequestRef.current?.reject(new Error(message));
+        pendingTokenRequestRef.current = null;
+        setAuthMessage(message);
       },
     });
 
-    tokenClientRef.current.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+    return new Promise((resolve, reject) => {
+      pendingTokenRequestRef.current = { resolve, reject };
+      tokenClientRef.current?.requestAccessToken({
+        prompt: prompt ?? (accessTokenRef.current ? '' : 'consent'),
+      });
+    });
+  };
+
+  const getFreshAccessToken = async () => {
+    const refreshBufferMs = 5 * 60 * 1000;
+
+    if (
+      accessTokenRef.current &&
+      tokenExpiresAtRef.current &&
+      Date.now() < tokenExpiresAtRef.current - refreshBufferMs
+    ) {
+      return accessTokenRef.current;
+    }
+
+    return requestGoogleToken(accessTokenRef.current ? '' : 'consent');
   };
 
   const handlePhotosPicked = (pickedPhotos: PickedPhoto[]) => {
@@ -154,23 +202,51 @@ export default function App() {
 
     for (const photo of queue) {
       try {
+        const token = await getFreshAccessToken();
+        if (!token) {
+          throw new Error('Sign in with Google before uploading.');
+        }
+
         updatePhoto(photo.id, { status: 'uploading', error: undefined });
         updatePhoto(photo.id, { status: 'publishing' });
-        const result = await publishStreetViewPhoto(photo, accessToken);
+        const result = await publishStreetViewPhoto(photo, token);
         updatePhoto(photo.id, {
           status: 'success',
           shareLink: result.shareLink,
           publishStatus: result.publishStatus,
         });
       } catch (error) {
+        if (error instanceof Error && error.name === 'UnauthorizedError') {
+          try {
+            const refreshedToken = await requestGoogleToken('');
+            if (!refreshedToken) {
+              throw new Error('Google token expired. Sign in again before continuing.');
+            }
+
+            updatePhoto(photo.id, { status: 'uploading', error: undefined });
+            updatePhoto(photo.id, { status: 'publishing' });
+            const retryResult = await publishStreetViewPhoto(photo, refreshedToken);
+            updatePhoto(photo.id, {
+              status: 'success',
+              shareLink: retryResult.shareLink,
+              publishStatus: retryResult.publishStatus,
+            });
+            continue;
+          } catch (refreshError) {
+            const refreshMessage =
+              refreshError instanceof Error
+                ? refreshError.message
+                : 'Google token expired. Sign in again before continuing.';
+
+            saveAccessToken(null);
+            setAuthMessage('Google token expired. Sign in again before continuing.');
+            updatePhoto(photo.id, { status: 'error', error: refreshMessage });
+            break;
+          }
+        }
+
         const message = error instanceof Error ? error.message : 'Upload failed.';
         updatePhoto(photo.id, { status: 'error', error: message });
-
-        if (error instanceof Error && error.name === 'UnauthorizedError') {
-          setAccessToken(null);
-          setAuthMessage('Google token expired. Sign in again before continuing.');
-          break;
-        }
       }
     }
 
@@ -208,7 +284,9 @@ export default function App() {
             <Pressable
               onPress={
                 Platform.OS === 'web'
-                  ? requestGoogleToken
+                  ? () => {
+                      void requestGoogleToken();
+                    }
                   : () => {
                       setMobilePreviewSignedIn(true);
                       setAuthMessage('');
@@ -244,7 +322,9 @@ export default function App() {
             {Platform.OS === 'web' ? (
               <Pressable
                 disabled={isUploading}
-                onPress={requestGoogleToken}
+                onPress={() => {
+                  void requestGoogleToken();
+                }}
                 style={({ pressed }) => [
                   styles.secondaryButton,
                   pressed && !isUploading && styles.secondaryButtonPressed,
