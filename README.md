@@ -6,7 +6,7 @@ Google Street View publisher for 360 panorama photos.
 
 Open the web app at:
 
-- `https://znbang.github.io/stviewpub/`
+- [https://znbang.github.io/stviewpub/](https://znbang.github.io/stviewpub/)
 
 ## Features
 
