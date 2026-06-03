@@ -2,6 +2,12 @@
 
 Google Street View publisher for 360 panorama photos.
 
+## Use
+
+Open the web app at:
+
+- `https://znbang.github.io/stviewpub/`
+
 ## Features
 
 - Select multiple JPEG panorama photos.
@@ -46,7 +52,7 @@ This repository includes a GitHub Actions workflow for GitHub Pages deployment.
 
 Before using the deployed app, configure the Google OAuth client with the GitHub Pages origin:
 
-- `https://<user>.github.io`
+- `https://znbang.github.io`
 
 Do not commit OAuth client secrets.
 
