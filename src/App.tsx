@@ -27,6 +27,9 @@ const statusLabels: Record<QueuePhoto['status'], string> = {
   error: 'Error',
 };
 
+const canUploadPhoto = (photo: QueuePhoto) =>
+  !!photo.location && (photo.status === 'pending' || photo.status === 'error');
+
 type GoogleUser = {
   name?: string;
   email?: string;
@@ -96,7 +99,7 @@ export default function App() {
   > | null>(null);
 
   const uploadablePhotos = useMemo(
-    () => photos.filter((photo) => photo.status === 'pending' && photo.location),
+    () => photos.filter(canUploadPhoto),
     [photos],
   );
   const skippedCount = photos.filter((photo) => photo.status === 'skipped').length;
@@ -222,15 +225,26 @@ export default function App() {
     }
 
     setIsUploading(true);
-    const queue = photos.filter((photo) => photo.status === 'pending' && photo.location);
+    const queue = photos.filter(canUploadPhoto);
+    let token: string | null = null;
+
+    try {
+      token = await getFreshAccessToken();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Sign in with Google before uploading.';
+      setAuthMessage(message);
+      setIsUploading(false);
+      return;
+    }
+
+    if (!token) {
+      setAuthMessage('Sign in with Google before uploading.');
+      setIsUploading(false);
+      return;
+    }
 
     for (const photo of queue) {
       try {
-        const token = await getFreshAccessToken();
-        if (!token) {
-          throw new Error('Sign in with Google before uploading.');
-        }
-
         updatePhoto(photo.id, { status: 'uploading', error: undefined });
         updatePhoto(photo.id, { status: 'publishing' });
         const result = await publishStreetViewPhoto(photo, token);
@@ -247,6 +261,7 @@ export default function App() {
               throw new Error('Google token expired. Sign in again before continuing.');
             }
 
+            token = refreshedToken;
             updatePhoto(photo.id, { status: 'uploading', error: undefined });
             updatePhoto(photo.id, { status: 'publishing' });
             const retryResult = await publishStreetViewPhoto(photo, refreshedToken);
@@ -264,7 +279,7 @@ export default function App() {
 
             saveAccessToken(null);
             setAuthMessage('Google token expired. Sign in again before continuing.');
-            updatePhoto(photo.id, { status: 'error', error: refreshMessage });
+            updatePhoto(photo.id, { status: 'pending', error: refreshMessage });
             break;
           }
         }
