@@ -255,37 +255,17 @@ export default function App() {
         });
       } catch (error) {
         if (error instanceof Error && error.name === 'UnauthorizedError') {
-          try {
-            const refreshedToken = await requestGoogleToken('');
-            if (!refreshedToken) {
-              throw new Error('Google token expired. Sign in again before continuing.');
-            }
+          const message = 'Google token expired. Sign in again, then continue uploading.';
 
-            token = refreshedToken;
-            updatePhoto(photo.id, { status: 'uploading', error: undefined });
-            updatePhoto(photo.id, { status: 'publishing' });
-            const retryResult = await publishStreetViewPhoto(photo, refreshedToken);
-            updatePhoto(photo.id, {
-              status: 'success',
-              shareLink: retryResult.shareLink,
-              publishStatus: retryResult.publishStatus,
-            });
-            continue;
-          } catch (refreshError) {
-            const refreshMessage =
-              refreshError instanceof Error
-                ? refreshError.message
-                : 'Google token expired. Sign in again before continuing.';
-
-            saveAccessToken(null);
-            setAuthMessage('Google token expired. Sign in again before continuing.');
-            updatePhoto(photo.id, { status: 'pending', error: refreshMessage });
-            break;
-          }
+          saveAccessToken(null);
+          setAuthMessage(message);
+          updatePhoto(photo.id, { status: 'pending', error: message });
+          break;
         }
 
         const message = error instanceof Error ? error.message : 'Upload failed.';
         updatePhoto(photo.id, { status: 'error', error: message });
+        break;
       }
     }
 
