@@ -477,7 +477,6 @@ function PhotoRow({ photo }: { photo: QueuePhoto }) {
             {photo.location.heading.toFixed(0)}
           </Text>
         ) : null}
-        {photo.publishStatus ? <Text style={styles.meta}>{photo.publishStatus}</Text> : null}
         {photo.shareLink ? (
           <View style={styles.actionRow}>
             <Pressable onPress={openShareLink} style={styles.linkAction}>
