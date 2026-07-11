@@ -32,9 +32,16 @@ const canUploadPhoto = (photo: QueuePhoto) =>
 
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
-type GoogleUser = {
-  name?: string;
-  email?: string;
+const fetchGoogleEmail = async (accessToken: string): Promise<string | null> => {
+  const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  if (!response.ok) return null;
+
+  const body = (await response.json()) as { email?: string };
+  return body.email ?? null;
 };
 
 const loadGoogleIdentityServices = () =>
@@ -68,24 +75,9 @@ const loadGoogleIdentityServices = () =>
     document.head.appendChild(script);
   });
 
-const fetchGoogleUser = async (accessToken: string): Promise<GoogleUser | null> => {
-  const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-  if (!response.ok) return null;
-
-  const body = (await response.json()) as GoogleUser;
-  return {
-    name: body.name,
-    email: body.email,
-  };
-};
-
 export default function App() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
   const [mobilePreviewSignedIn, setMobilePreviewSignedIn] = useState(false);
   const [authMessage, setAuthMessage] = useState('');
   const [photos, setPhotos] = useState<QueuePhoto[]>([]);
@@ -117,7 +109,7 @@ export default function App() {
     accessTokenRef.current = token;
     tokenExpiresAtRef.current = expiresAt;
     setAccessToken(token);
-    if (!token) setGoogleUser(null);
+    if (!token) setGoogleEmail(null);
   };
 
   const hasFreshAccessToken = () =>
@@ -150,8 +142,8 @@ export default function App() {
 
         if (response.access_token) {
           saveAccessToken(response.access_token, response.expires_in);
-          const user = await fetchGoogleUser(response.access_token).catch(() => null);
-          setGoogleUser(user);
+          const email = await fetchGoogleEmail(response.access_token).catch(() => null);
+          setGoogleEmail(email);
           setAuthMessage('Signed in for this browser session.');
           pendingRequest?.resolve(response.access_token);
           return;
@@ -175,9 +167,7 @@ export default function App() {
 
     return new Promise((resolve, reject) => {
       pendingTokenRequestRef.current = { resolve, reject };
-      tokenClientRef.current?.requestAccessToken({
-        prompt: prompt ?? (accessTokenRef.current ? '' : 'consent'),
-      });
+      tokenClientRef.current?.requestAccessToken(prompt === undefined ? undefined : { prompt });
     });
   };
 
@@ -186,7 +176,7 @@ export default function App() {
       return accessTokenRef.current;
     }
 
-    return requestGoogleToken(accessTokenRef.current ? '' : 'consent');
+    return requestGoogleToken('');
   };
 
   const handlePhotosPicked = (pickedPhotos: PickedPhoto[]) => {
@@ -289,7 +279,7 @@ export default function App() {
   const isSignedIn = Platform.OS === 'web' ? !!accessToken : mobilePreviewSignedIn;
   const canUpload = Platform.OS === 'web' && !!accessToken && uploadablePhotos.length > 0;
   const signedInLabel =
-    Platform.OS === 'web' ? (googleUser?.email ?? 'Signed in') : 'Preview';
+    Platform.OS === 'web' ? (googleEmail ?? 'Signed in with Google') : 'Preview';
   const uploadButtonLabel =
     Platform.OS !== 'web'
       ? 'Web upload only'
