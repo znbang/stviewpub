@@ -82,6 +82,9 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [photos, setPhotos] = useState<QueuePhoto[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const photosRef = useRef<QueuePhoto[]>([]);
+  const isUploadingRef = useRef(false);
+  const autoUploadEnabledRef = useRef(false);
   const accessTokenRef = useRef<string | null>(null);
   const tokenExpiresAtRef = useRef(0);
   const pendingTokenRequestRef = useRef<{
@@ -146,6 +149,11 @@ export default function App() {
           setGoogleEmail(email);
           setAuthMessage('Signed in for this browser session.');
           pendingRequest?.resolve(response.access_token);
+          if (autoUploadEnabledRef.current) {
+            setTimeout(() => {
+              void startUpload();
+            }, 0);
+          }
           return;
         }
 
@@ -199,51 +207,72 @@ export default function App() {
       };
     });
 
-    setPhotos(nextPhotos);
+    const knownIds = new Set(photosRef.current.map((photo) => photo.id));
+    const uniquePhotos = nextPhotos.filter((photo) => {
+      if (knownIds.has(photo.id)) return false;
+      knownIds.add(photo.id);
+      return true;
+    });
+    const mergedPhotos = [...photosRef.current, ...uniquePhotos];
+
+    photosRef.current = mergedPhotos;
+    setPhotos(mergedPhotos);
+
+    if (autoUploadEnabledRef.current && uniquePhotos.some(canUploadPhoto)) {
+      void startUpload();
+    }
   };
 
   const updatePhoto = (id: string, patch: Partial<QueuePhoto>) => {
-    setPhotos((current) =>
-      current.map((photo) => (photo.id === id ? { ...photo, ...patch } : photo)),
+    const nextPhotos = photosRef.current.map((photo) =>
+      photo.id === id ? { ...photo, ...patch } : photo,
     );
+    photosRef.current = nextPhotos;
+    setPhotos(nextPhotos);
   };
 
-  const startUpload = async () => {
+  const startUpload = async (retryErrors = false) => {
     if (Platform.OS !== 'web') return;
-    if (!accessToken) {
+    if (isUploadingRef.current) return;
+    if (!accessTokenRef.current) {
       setAuthMessage('Sign in with Google before uploading.');
       return;
     }
 
+    autoUploadEnabledRef.current = true;
+    isUploadingRef.current = true;
     setIsUploading(true);
-    const queue = photos.filter(canUploadPhoto);
-    let token: string | null = null;
-
-    try {
-      token = await getFreshAccessToken();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Sign in with Google before uploading.';
-      setAuthMessage(message);
-      setIsUploading(false);
-      return;
+    if (retryErrors) {
+      const retriedPhotos = photosRef.current.map((photo) =>
+        photo.status === 'error' && photo.location
+          ? { ...photo, status: 'pending' as const, error: undefined }
+          : photo,
+      );
+      photosRef.current = retriedPhotos;
+      setPhotos(retriedPhotos);
     }
 
-    if (!token) {
-      setAuthMessage('Sign in with Google before uploading.');
-      setIsUploading(false);
-      return;
-    }
+    while (true) {
+      const photo = photosRef.current.find(
+        (candidate) => !!candidate.location && candidate.status === 'pending',
+      );
+      if (!photo) break;
 
-    for (const photo of queue) {
       try {
-        if (!hasFreshAccessToken()) {
-          const message = 'Google token expired. Sign in again, then continue uploading.';
-
+        let token: string | null = null;
+        try {
+          token = await getFreshAccessToken();
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Google authorization is required to continue uploading.';
           saveAccessToken(null);
           setAuthMessage(message);
           updatePhoto(photo.id, { status: 'pending', error: message });
           break;
         }
+        if (!token) break;
 
         updatePhoto(photo.id, { status: 'uploading', error: undefined });
         updatePhoto(photo.id, { status: 'publishing' });
@@ -265,15 +294,29 @@ export default function App() {
 
         const message = error instanceof Error ? error.message : 'Upload failed.';
         updatePhoto(photo.id, { status: 'error', error: message });
-        break;
       }
     }
 
+    isUploadingRef.current = false;
     setIsUploading(false);
+
+    if (
+      autoUploadEnabledRef.current &&
+      !!accessTokenRef.current &&
+      photosRef.current.some((photo) => photo.status === 'pending' && !!photo.location)
+    ) {
+      setTimeout(() => {
+        void startUpload();
+      }, 0);
+    }
   };
 
   const clearPhotos = () => {
-    if (!isUploading) setPhotos([]);
+    if (!isUploading) {
+      autoUploadEnabledRef.current = false;
+      photosRef.current = [];
+      setPhotos([]);
+    }
   };
 
   const isSignedIn = Platform.OS === 'web' ? !!accessToken : mobilePreviewSignedIn;
@@ -345,6 +388,7 @@ export default function App() {
                 disabled={isUploading}
                 onPress={() => {
                   setMobilePreviewSignedIn(false);
+                  photosRef.current = [];
                   setPhotos([]);
                 }}
                 style={styles.secondaryButton}
@@ -370,7 +414,7 @@ export default function App() {
                   <Text style={styles.textButtonLabel}>Clear</Text>
                 </Pressable>
               ) : null}
-              <PhotoPicker disabled={isUploading} onPhotosPicked={handlePhotosPicked} />
+              <PhotoPicker disabled={false} onPhotosPicked={handlePhotosPicked} />
             </View>
           </View>
 
@@ -388,7 +432,9 @@ export default function App() {
             </View>
             <Pressable
               disabled={!canUpload || isUploading}
-              onPress={startUpload}
+              onPress={() => {
+                void startUpload(true);
+              }}
               style={({ pressed }) => [
                 styles.primaryButton,
                 (!canUpload || isUploading) && styles.disabled,

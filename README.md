@@ -10,7 +10,9 @@ Open the web app at:
 
 ## Features
 
-- Select multiple JPEG panorama photos.
+- Select multiple JPEG panorama photos or drag in multiple folders.
+- Add more photos while an upload is running without replacing the current queue.
+- Skip duplicate selections and continue the queue after Google reauthorization.
 - Validate GPS EXIF metadata before upload.
 - Publish photos to Google Street View from the web app.
 - Track per-photo upload and publish status.
